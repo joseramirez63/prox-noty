@@ -1,72 +1,91 @@
-# Prox-Noty: Proxmox Git RSS Notifier & AI Summarizer
+# Prox-Noty: Notificador RSS de Proxmox con Telegram + IA
 
-Prox-Noty is an intelligent Telegram bot designed to monitor Proxmox repositories (or any Gitweb RSS feeds) and notify you of new commits. It goes beyond simple notifications by downloading the commit code diffs and using Artificial Intelligence to provide clear, contextualized summaries of the changes.
+Prox-Noty es un bot de Telegram que monitorea feeds RSS de repositorios Gitweb (por ejemplo, Proxmox), detecta nuevos commits y envía un resumen en español de los cambios usando IA.
 
-## Features
-- 🔄 **Real-Time Polling**: Monitors Gitweb RSS feeds without needing a webhook server.
-- 🧠 **AI Fallback System**: Supports multiple AI providers (SambaNova, Groq, Gemini) with a priority fallback mechanism. If one API fails, the bot seamlessly tries the next.
-- 🔖 **Version Bump Detection**: Automatically detects version bumps (e.g., `bump version to 9.1.10`) and highlights them.
-- 🐱 **The Cat API Integration**: Celebrates new version releases by sending a random cat image alongside the notification!
-- 🕒 **Timezone Conversion**: Converts UTC repository timestamps to your preferred local timezone.
+## ¿Qué hace?
+
+- 🔄 **Monitoreo por polling**: consulta RSS periódicamente sin necesidad de webhooks.
+- 🧠 **Resumen con IA y fallback**: intenta proveedores en orden (`SambaNova`, `Groq`, `Gemini`).
+- 🔖 **Detección de nuevas versiones**: identifica commits tipo `bump version`.
+- 🐱 **Integración opcional con The Cat API**: envía una imagen cuando detecta un cambio de versión.
+- 🕒 **Conversión de zona horaria**: convierte fechas UTC al huso horario configurado.
+
+## Flujo general
+
+1. Lee los feeds RSS configurados.
+2. Compara con el último commit procesado (estado local en `state.json`).
+3. Descarga el `commitdiff`.
+4. Genera resumen en español con IA (según prioridad y disponibilidad).
+5. Envía notificación a Telegram (con imagen de gato en version bumps, si aplica).
 
 ---
 
-## 🛠️ Setup Instructions
+## Requisitos
 
-### 1. Requirements
-- Python 3.12+
-- `uv` (Recommended) or `pip`
+- Python **3.14+**
+- `uv` (recomendado) o `pip`
+- Token de bot de Telegram y `chat_id`
+- Al menos una API key de IA (opcional pero recomendado para resúmenes)
 
-### 2. Installation
-Clone the repository and install the dependencies:
+## Instalación
+
 ```bash
-uv sync # If using uv
-# OR
-pip install -r requirements.txt # (You can generate this if needed)
+uv sync
 ```
-*(Dependencies: `python-telegram-bot`, `httpx`, `feedparser`, `beautifulsoup4`, `python-dotenv`, `google-generativeai`, `groq`, `openai`, `pytz`)*
 
-### 3. Configuration
-1. Copy the template `.env.example` file to `.env`:
+> Si no usas `uv`, instala dependencias equivalentes con `pip` desde tu entorno.
+
+## Configuración
+
+1. Copia el archivo de ejemplo:
+
    ```bash
    cp .env.example .env
    ```
-2. Open `.env` and fill in your keys. **Do not commit your `.env` to Git!**
 
-### 4. Running the Bot
-Run the bot locally or deploy it to a server/VPS:
+2. Edita `.env` y completa tus variables:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `PROXMOX_BACKUP_RSS`
+- `PVE_MANAGER_RSS`
+- `AI_PRIORITY` (ejemplo: `sambanova,groq,gemini`)
+- `GEMINI_API_KEY`, `GROQ_API_KEY`, `SAMBANOVA_API_KEY` (las que tengas)
+- `CAT_API_KEY` (opcional)
+- `TIMEZONE` (ejemplo: `America/Caracas`)
+- `CHECK_INTERVAL` en segundos
+
+## Ejecución
+
 ```bash
 uv run python main.py
 ```
 
 ---
 
-## 🤖 AI Providers & Models Configuration
+## Proveedores de IA: notas rápidas
 
-This bot is designed to be resilient. You can define your preferred order of AI execution using the `AI_PRIORITY` variable in `.env`.
+No necesitas los tres proveedores. Si una API key no está configurada, el bot la omite automáticamente.
 
-> [!TIP]
-> You do **not** need all three providers. If you only have one API key (e.g., Groq), just leave the others empty. The bot will automatically ignore missing keys.
+- **SambaNova**: puede devolver `410 GONE` si el modelo ya no existe. Actualiza `SAMBANOVA_MODEL`.
+- **Groq**: puede devolver `429 TOO MANY REQUESTS` por límite de cuota.
+- **Gemini**: puede devolver `429 RESOURCE_EXHAUSTED` por rate limit.
 
-### Known Issues & Troubleshooting with AI Providers
-
-#### SambaNova (`sambanova`)
-SambaNova frequently updates their free models and occasionally deprecates older ones. 
-- **Error:** `410 GONE` or "The requested model is not available".
-- **Fix:** SambaNova has removed the model you configured (e.g., `Meta-Llama-3.1-70B`). Go to [SambaNova Cloud](https://cloud.sambanova.ai/), check their currently available models, and update `SAMBANOVA_MODEL` in your `.env` (e.g., change to `DeepSeek-V3.1`).
-
-#### Groq (`groq`)
-Groq is extremely fast but has strict rate limits on the free tier.
-- **Error:** `429 TOO MANY REQUESTS`.
-- **Fix:** This usually happens if you restart the bot too many times in a short period during testing. In production (polling every 5 minutes), you should rarely hit this. If it happens, the bot will automatically fall back to the next provider.
-
-#### Gemini (`gemini`)
-Google's Gemini 2.0 Flash is a great fallback but also enforces rate limits.
-- **Error:** `429 RESOURCE_EXHAUSTED`.
-- **Fix:** Similar to Groq, wait a minute before sending another request.
+El bot continuará con el siguiente proveedor según `AI_PRIORITY`.
 
 ---
 
-## 🔖 Cat API Integration
-The bot uses The Cat API to fetch a random image for "Version Bump" commits. 
-Get your free API key at [TheCatAPI](https://thecatapi.com/) and paste it in `CAT_API_KEY`. If left blank or if it fails, the bot will simply send the notification as a regular text message without the image.
+## Seguridad y buenas prácticas
+
+- ❗ **Nunca subas tu `.env` al repositorio**.
+- Usa tokens/API keys con privilegios mínimos.
+- Rota credenciales si sospechas filtración.
+- Revisa logs antes de compartirlos (pueden contener datos sensibles).
+
+## Integración con The Cat API (opcional)
+
+Para commits detectados como nueva versión, el bot puede enviar imagen:
+
+- Obtén API key gratuita en [TheCatAPI](https://thecatapi.com/).
+- Configúrala en `CAT_API_KEY`.
+- Si falla o está vacía, el bot envía solo texto sin romper el flujo.
