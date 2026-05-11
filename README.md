@@ -46,7 +46,7 @@ uv sync
 2. Edita `.env` y completa tus variables:
 
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_CHAT_ID` (Opcional, se puede auto-configurar enviándole `/start` al bot)
 - `PROXMOX_BACKUP_RSS`
 - `PVE_MANAGER_RSS`
 - `AI_PRIORITY` (ejemplo: `sambanova,groq,gemini`)
@@ -57,11 +57,43 @@ uv sync
 
 ## Ejecución
 
+Para iniciar el bot en primer plano para pruebas:
+
 ```bash
-uv run python main.py
+uv run main.py
 ```
 
+### ¿Cómo ejecutarlo en segundo plano?
+
+Sí, es totalmente posible dejarlo ejecutándose en segundo plano para que siga vivo aunque cierres la terminal. Aquí tienes las opciones más recomendadas:
+
+1. **Usando `screen` o `tmux` (Linux/macOS):**
+   ```bash
+   screen -S proxnoty
+   uv run main.py
+   # Presiona Ctrl+A y luego D para salir sin cerrar el bot.
+   ```
+
+2. **Usando `nohup` (Linux/macOS):**
+   ```bash
+   nohup uv run main.py > bot.log 2>&1 &
+   ```
+
+3. **Usando un Servicio Systemd (Linux - Ideal para Servidores):**
+   Crea un archivo `/etc/systemd/system/proxnoty.service` que ejecute tu script. Esto permite que el bot se reinicie automáticamente si el servidor se reinicia.
+
+4. **Usando PM2 (Windows/Linux/macOS):**
+   ```bash
+   pm2 start "uv run main.py" --name proxnoty
+   ```
+
 ---
+
+## 🤖 Vincular tu Chat Automáticamente
+
+Una vez que el bot esté ejecutándose (en primer o segundo plano), **ve a Telegram y envíale el comando `/start`**. 
+
+El bot detectará automáticamente tu Chat ID, lo guardará en sus configuraciones y comenzará a enviar las notificaciones a ese chat sin que tengas que reiniciar nada.
 
 ## Proveedores de IA: notas rápidas
 
