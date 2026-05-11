@@ -8,12 +8,13 @@ from datetime import datetime
 import pytz
 import feedparser
 import httpx
-import google.generativeai as genai
+from google import genai
 from groq import Groq
 from openai import OpenAI
-from telegram import Bot
+from telegram import Bot, Update
 from telegram.constants import ParseMode
-from dotenv import load_dotenv
+from telegram.ext import Application, CommandHandler, ContextTypes
+from dotenv import load_dotenv, set_key
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 
@@ -53,8 +54,7 @@ AI_CLIENTS = {}
 def init_ai_clients():
     if GEMINI_KEY and "AIza" in GEMINI_KEY:
         try:
-            genai.configure(api_key=GEMINI_KEY)
-            AI_CLIENTS['gemini'] = genai.GenerativeModel('gemini-2.0-flash')
+            AI_CLIENTS['gemini'] = genai.Client(api_key=GEMINI_KEY)
         except: pass
     if GROQ_KEY and "gsk_" in GROQ_KEY:
         try: AI_CLIENTS['groq'] = Groq(api_key=GROQ_KEY)
@@ -124,7 +124,11 @@ async def summarize_with_fallback(diff_text):
         if provider in AI_CLIENTS:
             try:
                 if provider == 'gemini':
-                    res = await asyncio.to_thread(AI_CLIENTS['gemini'].generate_content, prompt)
+                    res = await asyncio.to_thread(
+                        AI_CLIENTS['gemini'].models.generate_content,
+                        model='gemini-2.0-flash',
+                        contents=prompt
+                    )
                     if res.text: return res.text, provider
                 elif provider == 'groq':
                     res = await asyncio.to_thread(AI_CLIENTS['groq'].chat.completions.create, messages=[{"role": "user", "content": prompt}], model=GROQ_MODEL)
@@ -135,7 +139,32 @@ async def summarize_with_fallback(diff_text):
             except: continue
     return "Resumen no disponible.", "None"
 
-async def check_updates(bot: Bot, state):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    state = context.bot_data["state"]
+    state["chat_id"] = chat_id
+    save_state(state)
+    
+    # Attempt to update .env as well for persistence
+    try:
+        set_key(".env", "TELEGRAM_CHAT_ID", chat_id)
+    except Exception as e:
+        logger.error(f"Could not update .env: {e}")
+        
+    await update.message.reply_text(
+        f"✅ ¡Bot vinculado exitosamente a este chat!\n"
+        f"ID del Chat: {chat_id}\n\n"
+        f"Comenzaré a monitorear Proxmox y enviaré las notificaciones aquí."
+    )
+
+async def check_updates_task(context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    state = context.bot_data["state"]
+    chat_id = state.get("chat_id") or os.getenv("TELEGRAM_CHAT_ID")
+    
+    if not chat_id:
+        return # Skip if no chat ID is set yet
+        
     for repo_name, rss_url in REPOS.items():
         feed = feedparser.parse(rss_url)
         if not feed.entries: continue
@@ -169,31 +198,34 @@ async def check_updates(bot: Bot, state):
                 if is_bump:
                     cat_url = await get_cat_image()
                     if cat_url:
-                        await bot.send_photo(chat_id=CHAT_ID, photo=cat_url, caption=message[:1024], parse_mode=None)
+                        await bot.send_photo(chat_id=chat_id, photo=cat_url, caption=message[:1024], parse_mode=None)
                     else:
-                        await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode=None)
+                        await bot.send_message(chat_id=chat_id, text=message, parse_mode=None)
                 else:
-                    await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode=None)
+                    await bot.send_message(chat_id=chat_id, text=message, parse_mode=None)
                 
                 state[repo_name] = entry.id
                 save_state(state)
             except Exception as e:
                 logger.error(f"Send error: {e}")
 
-async def main():
+def main():
     init_ai_clients()
-    bot = Bot(token=TELEGRAM_TOKEN)
     state = load_state()
     for repo_name, rss_url in REPOS.items():
         if repo_name not in state:
             feed = feedparser.parse(rss_url)
             if feed.entries: state[repo_name] = feed.entries[0].id
     save_state(state)
-    logger.info("Bot activo...")
-    while True:
-        try: await check_updates(bot, state)
-        except Exception as e: logger.error(f"Loop error: {e}")
-        await asyncio.sleep(CHECK_INTERVAL)
+    
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.bot_data["state"] = state
+    app.add_handler(CommandHandler("start", start_command))
+    
+    app.job_queue.run_repeating(check_updates_task, interval=CHECK_INTERVAL, first=5)
+    
+    logger.info("Bot activo y esperando comandos...")
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
